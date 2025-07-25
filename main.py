@@ -5,8 +5,8 @@ from bs4 import BeautifulSoup
 from telegram import Bot
 
 # 설정값
-TOKEN = '여기에_텔레그램_봇_토큰을_입력하세요'
-CHAT_ID = '여기에_텔레그램_CHAT_ID를_입력하세요'
+TOKEN = '7154715773:AAGEHbCEtnvrZ5LNVZxUw3WiUiRINfO6iHU'
+CHAT_ID = '-1002887632454'
 bot = Bot(token=TOKEN)
 
 # 키워드 설정
