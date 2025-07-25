@@ -1,61 +1,76 @@
-from keep_alive import keep_alive
-import time
 import requests
+import schedule
+import time
 from bs4 import BeautifulSoup
 from telegram import Bot
+from collections import deque
+from keep_alive import keep_alive  # 웹서버용
 
-# 설정값
+# ✅ 텔레그램 정보 (직접 입력)
 TOKEN = '7154715773:AAGEHbCEtnvrZ5LNVZxUw3WiUiRINfO6iHU'
 CHAT_ID = '-1002887632454'
 bot = Bot(token=TOKEN)
 
-# 키워드 설정
+# ✅ 키워드 및 필터
 KEYWORDS = ["새마을금고", "금고", "MG"]
-FILTER_KEYWORDS = ["새마을금고", "MG"]  # 전송 필터 키워드 (잡음 방지)
+FILTER_KEYWORDS = ["새마을금고", "MG"]  # 메시지 전송 필터
 
-# 중복 뉴스 방지
-SENT_NEWS = set()
+# ✅ 최근 뉴스 링크 저장 (중복 방지, 최대 100개)
+SENT_NEWS = deque(maxlen=100)
 
 def shorten_url(url):
     try:
         res = requests.get(f"https://tinyurl.com/api-create.php?url={url}")
-        return res.text.strip()
+        if res.status_code == 200:
+            return res.text.strip()
+        else:
+            return url
     except Exception as e:
-        print(f"URL 단축 실패: {e}")
+        print(f"[❌] URL 단축 실패: {e}")
         return url
 
 def get_news():
-    print("🔎 뉴스 수집 중...")
+    print("🔍 뉴스 수집 중...")
     for keyword in KEYWORDS:
         url = f"https://news.google.com/rss/search?q={keyword}&hl=ko&gl=KR&ceid=KR:ko"
         try:
             res = requests.get(url)
+            res.raise_for_status()
             soup = BeautifulSoup(res.content, 'xml')
             items = soup.findAll('item')
-            
+
             for entry in items:
                 title = entry.title.text
                 link = entry.link.text
 
-                # 잡음 필터링: 제목에 필수 키워드 포함 여부 확인
                 if not any(fk in title for fk in FILTER_KEYWORDS):
-                    continue  # 새마을금고/MG 안 들어간 뉴스는 스킵
-
+                    continue
                 if link in SENT_NEWS:
-                    continue  # 중복 뉴스 스킵
+                    continue
 
                 short_url = shorten_url(link)
                 message = f"📰 [{keyword}] {title}\n{short_url}"
-                bot.send_message(chat_id=CHAT_ID, text=message)
-                SENT_NEWS.add(link)
+
+                try:
+                    bot.send_message(chat_id=CHAT_ID, text=message)
+                    print(f"✅ 전송됨: {title}")
+                    SENT_NEWS.append(link)
+                except Exception as e:
+                    print(f"[❌] 메시지 전송 실패: {e}")
+                    time.sleep(5)
 
         except Exception as e:
-            print(f"뉴스 수집 오류 ({keyword}): {e}")
+            print(f"[❌] 뉴스 수집 오류 ({keyword}): {e}")
+            time.sleep(5)
 
-# 서버 활성화
+# ✅ keep_alive 서버 실행
 keep_alive()
 
-# 루프 실행
+# ✅ 10분마다 실행
+schedule.every(10).minutes.do(get_news)
+
+# ✅ 루프 실행
+print("🚀 뉴스 봇 실행 중...")
 while True:
-    get_news()
-    time.sleep(600)  # 10분마다 실행
+    schedule.run_pending()
+    time.sleep(1)
