@@ -58,4 +58,4 @@ keep_alive()
 # 루프 실행
 while True:
     get_news()
-    time.sleep(60)  # 10분마다 실행
+    time.sleep(600)  # 10분마다 실행
