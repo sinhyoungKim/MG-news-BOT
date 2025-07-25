@@ -1,87 +1,61 @@
-from flask import Flask
-from threading import Thread
-import os
-import requests
+from keep_alive import keep_alive
 import time
-import feedparser
-from datetime import datetime, timedelta
+import requests
+from bs4 import BeautifulSoup
+from telegram import Bot
 
-app = Flask(__name__)
+# 설정값
+TOKEN = '여기에_텔레그램_봇_토큰을_입력하세요'
+CHAT_ID = '여기에_텔레그램_CHAT_ID를_입력하세요'
+bot = Bot(token=TOKEN)
 
-@app.route('/')
-def home():
-    return "✅ 봇이 살아있어요!"
+# 키워드 설정
+KEYWORDS = ["새마을금고", "금고", "MG"]
+FILTER_KEYWORDS = ["새마을금고", "MG"]  # 전송 필터 키워드 (잡음 방지)
 
-# ✅ 뉴스봇 설정
-KEYWORD = "새마을금고"
-BOT_TOKEN = "7154715773:AAGEHbCEtnvrZ5LNVZxUw3WiUiRINfO6iHU"
-CHAT_ID = "-1002887632454"
-INTERVAL = 600  # 10분
-MAX_NEWS_COUNT = 10
-TIME_LIMIT_MINUTES = 10
-sent_titles = set()
+# 중복 뉴스 방지
+SENT_NEWS = set()
 
 def shorten_url(url):
     try:
-        res = requests.get(f"https://tinyurl.com/api-create.php?url={url}", timeout=5)
-        if res.status_code == 200:
-            return res.text
+        res = requests.get(f"https://tinyurl.com/api-create.php?url={url}")
+        return res.text.strip()
     except Exception as e:
-        print("❌ URL 축소 실패:", e)
-    return url
-
-def is_recent_news(published_time_str):
-    try:
-        published_time = datetime(*feedparser._parse_date(published_time_str)[:6])
-        now = datetime.utcnow()
-        return (now - published_time) <= timedelta(minutes=TIME_LIMIT_MINUTES)
-    except:
-        return False
+        print(f"URL 단축 실패: {e}")
+        return url
 
 def get_news():
-    url = f"https://news.google.com/rss/search?q={KEYWORD}&hl=ko&gl=KR&ceid=KR:ko"
-    feed = feedparser.parse(url)
-    news_list = []
+    print("🔎 뉴스 수집 중...")
+    for keyword in KEYWORDS:
+        url = f"https://news.google.com/rss/search?q={keyword}&hl=ko&gl=KR&ceid=KR:ko"
+        try:
+            res = requests.get(url)
+            soup = BeautifulSoup(res.content, 'xml')
+            items = soup.findAll('item')
+            
+            for entry in items:
+                title = entry.title.text
+                link = entry.link.text
 
-    for entry in feed.entries:
-        if entry.title in sent_titles:
-            continue
-        if not is_recent_news(entry.published):
-            continue
+                # 잡음 필터링: 제목에 필수 키워드 포함 여부 확인
+                if not any(fk in title for fk in FILTER_KEYWORDS):
+                    continue  # 새마을금고/MG 안 들어간 뉴스는 스킵
 
-        short_link = shorten_url(entry.link)
-        news_list.append((entry.title, short_link))
-        sent_titles.add(entry.title)
+                if link in SENT_NEWS:
+                    continue  # 중복 뉴스 스킵
 
-        if len(news_list) >= MAX_NEWS_COUNT:
-            break
-    return news_list
+                short_url = shorten_url(link)
+                message = f"📰 [{keyword}] {title}\n{short_url}"
+                bot.send_message(chat_id=CHAT_ID, text=message)
+                SENT_NEWS.add(link)
 
-def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "disable_web_page_preview": False}
-    try:
-        requests.post(url, data=payload, timeout=5)
-    except Exception as e:
-        print("❌ 텔레그램 전송 실패:", e)
+        except Exception as e:
+            print(f"뉴스 수집 오류 ({keyword}): {e}")
 
-def news_loop():
-    while True:
-        print("🔎 뉴스 수집 중...")
-        news = get_news()
-        if news:
-            for title, link in news:
-                message = f"📰 {title}\n🔗 {link}"
-                send_telegram_message(message)
-                print("✅ 전송:", title)
-        else:
-            print("❌ 새로운 뉴스 없음")
-        time.sleep(INTERVAL)
+# 서버 활성화
+keep_alive()
 
-def run():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-if __name__ == "__main__":
-    Thread(target=run).start()        # Flask 서버
-    Thread(target=news_loop).start()  # 뉴스 루프
+# 루프 실행
+while True:
+    get_news()
+    time.sleep(60)  # 10분마다 실행
